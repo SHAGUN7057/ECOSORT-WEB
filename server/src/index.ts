@@ -1,0 +1,38 @@
+import 'dotenv/config';
+import http from 'http';
+import cors from 'cors';
+import express from 'express';
+import { Server } from 'socket.io';
+import { authRoutes } from './routes/authRoutes.js';
+import { adminRoutes } from './routes/adminRoutes.js';
+import { binRoutes } from './routes/binRoutes.js';
+import { pickupRoutes } from './routes/pickupRoutes.js';
+import { fleetRoutes } from './routes/fleetRoutes.js';
+import { customerRoutes, resourceRoutes } from './routes/resourceRoutes.js';
+import { driverRoutes } from './routes/driverRoutes.js';
+import { errorHandler, notFound } from './middleware/errors.js';
+import { analytics } from './controllers/dashboardController.js';
+import { requireAdmin } from './middleware/auth.js';
+
+const app = express();
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, { cors: { origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' } });
+app.set('io', io);
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
+app.use(express.json());
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', service: 'ecosort-api' }));
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/bins', binRoutes);
+app.use('/api/pickups', pickupRoutes);
+app.use('/api/fleet', fleetRoutes);
+app.use('/api/driver', driverRoutes);
+app.use('/api', resourceRoutes);
+app.use('/api/customer', customerRoutes);
+app.get('/api/analytics', requireAdmin, analytics);
+app.use(notFound);
+app.use(errorHandler);
+io.on('connection', (socket) => socket.emit('connected', { service: 'EcoSort live operations' }));
+
+const port = Number(process.env.PORT || 4000);
+httpServer.listen(port, () => console.log(`EcoSort API listening on :${port}`));

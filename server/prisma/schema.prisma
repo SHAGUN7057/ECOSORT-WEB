@@ -1,0 +1,282 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  MUNICIPAL_ADMIN
+  WARD_ADMIN
+}
+
+enum DriverStatus {
+  AVAILABLE
+  ON_ROUTE
+  OFFLINE
+  ON_LEAVE
+  INACTIVE
+}
+
+enum VanStatus {
+  AVAILABLE
+  ASSIGNED
+  ON_ROUTE
+  MAINTENANCE
+  OFFLINE
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+enum WasteType {
+  DRY
+  WET
+  METAL
+  EWASTE
+}
+
+enum PickupPriority {
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+enum PickupStatus {
+  UNASSIGNED
+  PENDING
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  OVERDUE
+}
+
+enum ComplaintCategory {
+  MISSED_PICKUP
+  BIN_ISSUE
+  DRIVER_ISSUE
+  OVERFLOW
+  TECHNICAL_ISSUE
+  OTHER
+}
+
+enum ComplaintStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED
+  REJECTED
+}
+
+enum NotificationKind {
+  PICKUP_ALERT
+  PICKUP_COMPLETED
+  FLEET_ATTENTION
+  COMPLAINT
+  FEEDBACK
+  MAINTENANCE
+  SYSTEM
+}
+
+model Admin {
+  id           String    @id @default(cuid()) @map("_id")
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(MUNICIPAL_ADMIN)
+  ward         String?
+  createdAt    DateTime  @default(now())
+}
+
+model Driver {
+  id                String                 @id @default(cuid()) @map("_id")
+  employeeId        String                 @unique
+  name              String
+  phone             String
+  email             String                 @unique
+  status            DriverStatus           @default(AVAILABLE)
+  ward              String?
+  passwordHash      String?
+  assignments       DailyFleetAssignment[]
+  pickupRequests    PickupRequest[]
+  notifications     PickupNotification[]
+  feedback          Feedback[]
+  createdAt         DateTime               @default(now())
+}
+
+model Van {
+  id             String                 @id @default(cuid()) @map("_id")
+  vanId          String                 @unique
+  registrationNo String                 @unique
+  capacityKg     Int
+  status         VanStatus              @default(AVAILABLE)
+  currentRoute   String?
+  lastActive     DateTime?
+  assignments    DailyFleetAssignment[]
+  pickupRequests PickupRequest[]
+  createdAt      DateTime               @default(now())
+}
+
+model DailyFleetAssignment {
+  id        String           @id @default(cuid()) @map("_id")
+  date      DateTime
+  driverId  String
+  vanId     String
+  ward      String
+  startTime DateTime?
+  endTime   DateTime?
+  status    AssignmentStatus @default(ACTIVE)
+  driver    Driver           @relation(fields: [driverId], references: [id])
+  van       Van              @relation(fields: [vanId], references: [id])
+  createdAt DateTime         @default(now())
+
+  @@unique([date, driverId])
+  @@unique([date, vanId])
+  @@index([date, ward, status])
+}
+
+model Household {
+  id           String          @id @default(cuid()) @map("_id")
+  houseNumber  String          @unique
+  customerName String
+  contact      String
+  ward         String
+  latitude     Float?
+  longitude    Float?
+  ecoPoints    Int             @default(0)
+  status       String          @default("ACTIVE")
+  registeredAt DateTime        @default(now())
+  bin          Bin?
+  pickups      PickupRequest[]
+  complaints   Complaint[]
+  feedback     Feedback[]
+  ecoPointsLog EcoPointTransaction[]
+}
+
+model Bin {
+  id          String          @id @default(cuid()) @map("_id")
+  binId       String          @unique
+  householdId String          @unique
+  isOnline    Boolean         @default(true)
+  lastUpdated DateTime        @default(now())
+  household   Household       @relation(fields: [householdId], references: [id])
+  compartments BinCompartment[]
+  readings    SensorReading[]
+  pickups     PickupRequest[]
+}
+
+model BinCompartment {
+  id          String    @id @default(cuid()) @map("_id")
+  binId       String
+  wasteType   WasteType
+  fillPercent Int       @default(0)
+  updatedAt   DateTime  @updatedAt
+  bin         Bin       @relation(fields: [binId], references: [id], onDelete: Cascade)
+  @@unique([binId, wasteType])
+}
+
+model SensorReading {
+  id        String   @id @default(cuid()) @map("_id")
+  binId     String
+  dry       Int
+  wet       Int
+  metal     Int
+  ewaste    Int
+  recordedAt DateTime @default(now())
+  bin       Bin      @relation(fields: [binId], references: [id], onDelete: Cascade)
+  @@index([binId, recordedAt])
+}
+
+model PickupRequest {
+  id             String         @id @default(cuid()) @map("_id")
+  householdId    String
+  binId          String
+  wasteType      WasteType
+  fillPercentage Int
+  ward           String
+  driverId       String?
+  vanId          String?
+  priority       PickupPriority
+  status         PickupStatus  @default(UNASSIGNED)
+  createdAt      DateTime      @default(now())
+  completedAt    DateTime?
+  household      Household      @relation(fields: [householdId], references: [id])
+  bin            Bin            @relation(fields: [binId], references: [id])
+  driver         Driver?        @relation(fields: [driverId], references: [id])
+  van            Van?           @relation(fields: [vanId], references: [id])
+  notifications  PickupNotification[]
+  collection     WasteCollection?
+  @@index([householdId, wasteType, status])
+  @@index([ward, status, priority])
+}
+
+model PickupNotification {
+  id              String        @id @default(cuid()) @map("_id")
+  pickupRequestId String
+  driverId        String
+  title           String
+  body            String
+  readAt          DateTime?
+  createdAt       DateTime      @default(now())
+  pickupRequest   PickupRequest @relation(fields: [pickupRequestId], references: [id], onDelete: Cascade)
+  driver          Driver        @relation(fields: [driverId], references: [id])
+}
+
+model Complaint {
+  id            String            @id @default(cuid()) @map("_id")
+  householdId   String
+  category      ComplaintCategory
+  description   String
+  priority      PickupPriority    @default(NORMAL)
+  status        ComplaintStatus   @default(OPEN)
+  assignedStaff String?
+  resolution    String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  household     Household         @relation(fields: [householdId], references: [id])
+}
+
+model Feedback {
+  id          String    @id @default(cuid()) @map("_id")
+  householdId String
+  driverId    String?
+  rating      Int
+  comment     String
+  createdAt   DateTime  @default(now())
+  household   Household @relation(fields: [householdId], references: [id])
+  driver      Driver?   @relation(fields: [driverId], references: [id])
+}
+
+model Notification {
+  id        String           @id @default(cuid()) @map("_id")
+  kind      NotificationKind
+  title     String
+  body      String
+  ward      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+}
+
+model WasteCollection {
+  id              String        @id @default(cuid()) @map("_id")
+  pickupRequestId String        @unique
+  wasteType       WasteType
+  weightKg        Float
+  collectedAt     DateTime      @default(now())
+  pickupRequest   PickupRequest @relation(fields: [pickupRequestId], references: [id])
+}
+
+model EcoPointTransaction {
+  id          String    @id @default(cuid()) @map("_id")
+  householdId String
+  points      Int
+  reason      String
+  createdAt   DateTime  @default(now())
+  household   Household @relation(fields: [householdId], references: [id])
+}
